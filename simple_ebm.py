@@ -7,19 +7,20 @@ from data import sample_2d_data
 class NeuralNet(torch.nn.Module):
     def __init__(self):
         super(NeuralNet, self).__init__()
-        layer1 = torch.nn.Linear(2, 32)
+        width = 128
+        layer1 = torch.nn.Linear(2, width)
         act1 = torch.nn.SiLU()
-        layer2 = torch.nn.Linear(32, 32)
+        layer2 = torch.nn.Linear(width, width)
         act2 = torch.nn.SiLU()
-        layer3 = torch.nn.Linear(32, 32)
+        layer3 = torch.nn.Linear(width, width)
         act3 = torch.nn.SiLU()
-        layer4 = torch.nn.Linear(32, 32)
+        layer4 = torch.nn.Linear(width, width)
         act4 = torch.nn.SiLU()
-        layer5 = torch.nn.Linear(32, 32)
+        layer5 = torch.nn.Linear(width, width)
         act5 = torch.nn.SiLU()
-        layer6 = torch.nn.Linear(32, 32)
+        layer6 = torch.nn.Linear(width, width)
         act6 = torch.nn.SiLU()
-        layer7 = torch.nn.Linear(32, 1)
+        layer7 = torch.nn.Linear(width, 1)
         self.layers = torch.nn.ModuleList([layer1,
                                            act1,
                                            layer2,
@@ -28,10 +29,10 @@ class NeuralNet(torch.nn.Module):
                                            act3,
                                            layer4,
                                            act4,
-                                           # layer5,
-                                           # act5,
-                                           # layer6,
-                                           # act6,
+                                           layer5,
+                                           act5,
+                                           layer6,
+                                           act6,
                                            layer7
                                            ])
 
@@ -60,9 +61,7 @@ class ReplayBuffer():
         return self.sample_list[indicies]
 
 
-def sample_langevin(x, model, sample_steps=10, step_size=10):
-    noise_scale = 0.005
-
+def sample_langevin(x, model, sample_steps=10, step_size=10, noise_scale=0.005, return_list=False):
     sample_list = []
     sample_list.append(x.detach())
     for _ in range(sample_steps):
@@ -73,14 +72,17 @@ def sample_langevin(x, model, sample_steps=10, step_size=10):
         gradient = torch.autograd.grad(model_output.sum(), x, only_inputs=True)[0]
         x = x - gradient * step_size + noise
         sample_list.append(x.detach().cpu())
-    return sample_list[-1]
+    if return_list:
+        return sample_list
+    else:
+        return sample_list[-1]
 
 
 if __name__ == '__main__':
     # model = NeuralNet().cuda()
     model = NeuralNet()
     # data = np.random.multivariate_normal([0, 0], [[1, 5], [5, 10]], size=1000)
-    data = sample_2d_data('rings', 4096)
+    data = sample_2d_data('2spirals', 4096)
     dataloader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(data),
                                              batch_size=128, shuffle=True, num_workers=12)
 
@@ -88,7 +90,7 @@ if __name__ == '__main__':
 
     replay_buffer = ReplayBuffer(8192, np.random.randn(*data.shape))
 
-    num_epochs = 200
+    num_epochs = 100
     reg_amount = 1
     replay_frac = 0.95
 
@@ -108,9 +110,12 @@ if __name__ == '__main__':
             neg_x = torch.Tensor(neg_x)
             neg_x.requires_grad = True
 
+            # Sensible defaults (shrug)
             sample_steps = 10
-            step_size = 10
-            neg_x = sample_langevin(neg_x, model, sample_steps=sample_steps, step_size=step_size)
+            step_size = 0.1
+            noise_scale = 0.1
+            neg_x = sample_langevin(neg_x, model, sample_steps=sample_steps, step_size=step_size,
+                                    noise_scale=noise_scale)
             replay_buffer.add(neg_x)
 
             optimizer.zero_grad()
@@ -132,7 +137,7 @@ if __name__ == '__main__':
         print("Epoch: {}\t Loss: {}".format(epoch, np.mean(total_loss)))
 
     rand_num = torch.randn((1000, 2), requires_grad=True)
-    samples = sample_langevin(rand_num, model, step_size=1, sample_steps=1)
+    samples = sample_langevin(rand_num, model, step_size=0.1, sample_steps=100, noise_scale=0.1)
 
     plt.figure(figsize=(10, 8))
     plt.scatter(data[:, 0], data[:, 1], marker='+', s=2)
@@ -140,9 +145,9 @@ if __name__ == '__main__':
     plt.savefig("img/data+samples.png")
 
     plt.figure(figsize=(10, 8))
-    plt.scatter(data[:, 0], data[:, 1], marker='+', s=2)
+    plt.scatter(data[:, 0], data[:, 1], marker='+', s=2, color=(1, 1, 1, 0.1))
     plt.savefig("img/data.png")
 
     plt.figure(figsize=(10, 8))
-    plt.scatter(samples[:, 0], samples[:, 1], marker='x', s=2)
+    plt.scatter(samples[:, 0], samples[:, 1], marker='x', s=2, color=(1, 1, 1, 0.1))
     plt.savefig("img/samples.png")
